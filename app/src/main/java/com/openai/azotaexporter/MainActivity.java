@@ -375,7 +375,8 @@ public class MainActivity extends Activity {
                         int limit = Math.min(missingArr.length(), 8);
                         for (int i = 0; i < limit; i++) {
                             if (i > 0) missing.append(",");
-                            missing.append(missingArr.optInt(i));
+                            String item = missingArr.optString(i, "");
+                            if (!item.isEmpty()) missing.append(item);
                         }
                         if (missingArr.length() > limit) missing.append("…");
                     }
@@ -397,7 +398,8 @@ public class MainActivity extends Activity {
                     if (missingArr != null && missingArr.length() > 0) {
                         StringBuilder sb = new StringBuilder();
                         int limit = Math.min(missingArr.length(), 8);
-                        for (int i = 0; i < limit; i++) { if (i > 0) sb.append(","); sb.append(missingArr.optInt(i)); }
+                        for (int i = 0; i < limit; i++) { if (i > 0) sb.append(","); String item = missingArr.optString(i, "");
+                            if (!item.isEmpty()) sb.append(item); }
                         if (missingArr.length() > limit) sb.append("…");
                         missing = sb.toString();
                     }
@@ -503,10 +505,23 @@ public class MainActivity extends Activity {
         for (int i = 0; qs != null && i < qs.length(); i++) {
             JSONObject q = qs.optJSONObject(i);
             if (q == null) continue;
-            body.append("<section class=\"azx-question\">").append(q.optString("html", "")).append("</section>\n");
+            String sectionTitle = q.optString("sectionTitle", "");
+            String previousSection = i > 0
+                    ? qs.optJSONObject(i - 1).optString("sectionTitle", "")
+                    : "";
+
+            if (!sectionTitle.isEmpty() && !sectionTitle.equals(previousSection)) {
+                body.append("<div class=\"azx-section-title\">")
+                        .append(htmlEscape(sectionTitle))
+                        .append("</div>\n");
+            }
+
+            body.append("<section class=\"azx-question\">")
+                    .append(q.optString("html", ""))
+                    .append("</section>\n");
         }
         return "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
-                css + "<style>@page{size:A4;margin:13mm}html,body{background:#fff!important;color:#111!important}body{font-family:Arial,'Times New Roman',sans-serif;line-height:1.5}main{max-width:900px;margin:auto}.azx-title{text-align:center;font-weight:700;font-size:20px;margin:0 0 14px}.azx-question{break-inside:avoid;page-break-inside:avoid;margin:0 0 16px;padding:10px 12px;border:1px solid #ddd;border-radius:8px;background:#fff!important}img,svg,mjx-container{max-width:100%!important;height:auto!important}button,input,textarea,select{display:none!important}</style></head><body><main><div class=\"azx-title\">" +
+                css + "<style>@page{size:A4;margin:13mm}html,body{background:#fff!important;color:#111!important}body{font-family:Arial,'Times New Roman',sans-serif;line-height:1.5}main{max-width:900px;margin:auto}.azx-title{text-align:center;font-weight:700;font-size:20px;margin:0 0 14px}.azx-section-title{font-weight:700;font-size:18px;margin:22px 0 12px}.azx-question{break-inside:avoid;page-break-inside:avoid;margin:0 0 16px;padding:10px 12px;border:1px solid #ddd;border-radius:8px;background:#fff!important}img,svg,mjx-container{max-width:100%!important;height:auto!important}button,input,textarea,select{display:none!important}</style></head><body><main><div class=\"azx-title\">" +
                 htmlEscape(extracted.optString("title", "Đề Azota")) + "</div>" + body + "</main></body></html>";
     }
 
@@ -700,6 +715,8 @@ public class MainActivity extends Activity {
             if (q == null) continue;
             DocQuestion dq = new DocQuestion();
             dq.number = q.optInt("n", i + 1);
+            dq.label = q.optString("label", "Câu " + dq.number);
+            dq.sectionTitle = q.optString("sectionTitle", "");
             dq.text = q.optString("text", "");
             JSONArray imgs = q.optJSONArray("images");
             if (imgs != null) {
@@ -813,8 +830,22 @@ public class MainActivity extends Activity {
         StringBuilder body = new StringBuilder();
         body.append(paragraph(title, true, true));
         body.append(paragraph("Xuất từ nội dung được hiển thị trong Azota", false, true));
+        String lastSection = "";
         for (DocQuestion q : questions) {
-            body.append(paragraph("Câu " + q.number, true, false));
+            if (q.sectionTitle != null
+                    && !q.sectionTitle.isEmpty()
+                    && !q.sectionTitle.equals(lastSection)) {
+                body.append(paragraph(q.sectionTitle, true, false));
+                lastSection = q.sectionTitle;
+            }
+
+            body.append(paragraph(
+                    q.label == null || q.label.isEmpty()
+                            ? "Câu " + q.number
+                            : q.label,
+                    true,
+                    false
+            ));
             String[] lines = q.text.replace("\r", "").split("\n");
             for (String line : lines) {
                 String t = line.trim();
@@ -891,6 +922,8 @@ public class MainActivity extends Activity {
 
     private static class DocQuestion {
         int number;
+        String label;
+        String sectionTitle;
         String text;
         List<DocImage> images = new ArrayList<>();
     }
