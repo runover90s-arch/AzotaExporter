@@ -4,7 +4,7 @@
   const nativeBridge = window.AzotaNative;
   if (!nativeBridge) return;
 
-  if (window.AZX_APP && window.AZX_APP.version >= 5) {
+  if (window.AZX_APP && window.AZX_APP.version >= 6) {
     try { window.AZX_APP.scanVisible(); } catch (_) {}
     return;
   }
@@ -755,53 +755,108 @@
     return Math.max(0, scroller.scrollHeight - scroller.clientHeight);
   }
 
-  function scrollCandidates() {
-    const candidates = [
+
+  function bestScroller() {
+    const candidates = new Set([
       document.scrollingElement || document.documentElement
-    ];
+    ]);
 
-    for (const el of document.querySelectorAll('*')) {
-      if (el.scrollHeight <= el.clientHeight + 260) continue;
-      const cs = getComputedStyle(el);
+    // Prefer scroll containers that actually contain visible question markers.
+    const ms = markers().slice(0, 8);
 
-      if (/auto|scroll|overlay/i.test(cs.overflowY)) candidates.push(el);
+    for (const marker of ms) {
+      let p = marker.parentElement;
+
+      while (p && p !== document.body) {
+        if (p.scrollHeight > p.clientHeight + 220) {
+          const cs = getComputedStyle(p);
+          if (/auto|scroll|overlay/i.test(cs.overflowY)) {
+            candidates.add(p);
+          }
+        }
+        p = p.parentElement;
+      }
     }
 
-    return [...new Set(candidates)]
-      .filter(Boolean)
-      .sort(
-        (a, b) =>
-          (b.scrollHeight - b.clientHeight) -
-          (a.scrollHeight - a.clientHeight)
-      )
-      .slice(0, 3);
-  }
+    const list = [...candidates].filter(Boolean);
 
-  async function pass(scroller, reverse) {
-    let max = maxTop(scroller);
-
-    const step = Math.max(
-      160,
-      Math.floor(viewportHeight(scroller) * 0.28)
+    list.sort(
+      (a, b) =>
+        (b.scrollHeight - b.clientHeight) -
+        (a.scrollHeight - a.clientHeight)
     );
 
-    const points = [];
+    return list[0] || document.scrollingElement || document.documentElement;
+  }
 
-    if (!reverse) {
-      for (let y = 0; y <= max + step; y += step) {
-        points.push(Math.min(y, max));
-      }
-    } else {
-      for (let y = max; y >= -step; y -= step) {
-        points.push(Math.max(0, y));
-      }
-    }
+  async function fastPass(scroller, reverse, deadline) {
+    const h = Math.max(360, viewportHeight(scroller));
+    const step = Math.max(300, Math.floor(h * 0.65));
 
-    for (const y of points) {
+    let y = reverse ? maxTop(scroller) : 0;
+    let stableBottom = 0;
+    let lastMax = -1;
+    let steps = 0;
+
+    while (Date.now() < deadline && steps < 700) {
+      const max = maxTop(scroller);
+
+      if (!reverse) {
+        y = Math.min(y, max);
+      } else {
+        y = Math.max(0, Math.min(y, max));
+      }
+
       setTop(scroller, y);
-      await sleep(520);
+
+      // 140 ms is enough for Azota/WebView to render the nearby virtualized items.
+      await sleep(140);
       scanVisible();
-      max = Math.max(max, maxTop(scroller));
+
+      if (steps % 10 === 0) {
+        const currentMax = Math.max(1, maxTop(scroller));
+        const pct = reverse
+          ? Math.round((1 - y / currentMax) * 100)
+          : Math.round((y / currentMax) * 100);
+
+        notify(
+          (reverse ? 'Bổ sung câu thiếu ' : 'Quét nhanh ') +
+          Math.max(0, Math.min(100, pct)) + '%'
+        );
+      }
+
+      if (reverse) {
+        if (y <= 0) break;
+        y = Math.max(0, y - step);
+      } else {
+        const newMax = maxTop(scroller);
+
+        if (y >= newMax - 4) {
+          // Give lazy loading a short chance to extend the page.
+          await sleep(180);
+          scanVisible();
+
+          const after = maxTop(scroller);
+
+          if (Math.abs(after - lastMax) < 8) {
+            stableBottom++;
+          } else {
+            stableBottom = 0;
+          }
+
+          lastMax = after;
+
+          if (stableBottom >= 2) break;
+
+          if (after > y + 4) {
+            y = Math.min(after, y + step);
+          }
+        } else {
+          y = Math.min(newMax, y + step);
+        }
+      }
+
+      steps++;
     }
   }
 
@@ -809,38 +864,30 @@
     if (state.scanning) return;
 
     state.scanning = true;
-    notify('Bắt đầu quét');
+    notify('Bắt đầu quét nhanh');
+
+    // Hard cap: never let one scan run for more than 90 seconds.
+    const deadline = Date.now() + 90000;
 
     try {
       scanVisible();
 
-      const scrollers = scrollCandidates();
-      const originals = scrollers.map(s => ({ s, top: currentTop(s) }));
+      const scroller = bestScroller();
+      const originalTop = currentTop(scroller);
 
-      let unchangedRounds = 0;
-      let lastCount = Object.keys(state.q).length;
+      // Pass 1: top -> bottom. This is normally enough.
+      setTop(scroller, 0);
+      await sleep(120);
+      await fastPass(scroller, false, deadline);
 
-      for (let round = 0; round < 5; round++) {
-        for (const s of scrollers) {
-          await pass(s, false);
-          await pass(s, true);
-        }
-
-        scanVisible();
-
-        const count = Object.keys(state.q).length;
-        notify('Lượt quét ' + (round + 1));
-
-        if (count === lastCount) unchangedRounds++;
-        else unchangedRounds = 0;
-
-        lastCount = count;
-        if (unchangedRounds >= 2) break;
+      // Only do a reverse pass when the scanner can actually identify gaps.
+      if (Date.now() < deadline && missingNumbers().length > 0) {
+        notify('Đang bổ sung các câu còn thiếu');
+        await fastPass(scroller, true, deadline);
       }
 
-      originals.forEach(x => setTop(x.s, x.top));
-
-      await sleep(250);
+      setTop(scroller, originalTop);
+      await sleep(120);
       scanVisible();
 
       const questions = Object.values(state.q)
@@ -896,7 +943,7 @@
   state.timer = setInterval(scanVisible, 1400);
 
   window.AZX_APP = {
-    version: 5,
+    version: 6,
     state,
     scanVisible,
     startScan
