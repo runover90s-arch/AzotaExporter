@@ -619,8 +619,7 @@ public class MainActivity extends Activity {
                 if (!href.isEmpty()) {
                     cssLinks.append("<link rel=\"stylesheet\" href=\"")
                             .append(htmlEscape(href))
-                            .append("\">
-");
+                            .append("\">\n");
                 }
             }
         }
@@ -806,20 +805,7 @@ public class MainActivity extends Activity {
                 "@media print{.azx-question{orphans:3;widows:3;}" +
                 ".azx-section-head{break-after:avoid-page;page-break-after:avoid;}}";
 
-        String paginationScript =
-                "<script>(function(){" +
-                "function clean(){" +
-                "document.querySelectorAll('.azx-option-text .azx-choice-letter').forEach(function(x){x.remove();});" +
-                "document.querySelectorAll('[style]').forEach(function(el){" +
-                "var s=el.getAttribute('style')||'';" +
-                "s=s.replace(/background(?:-color)?\s*:[^;]+;?/gi,'');" +
-                "s=s.replace(/color\s*:[^;]+;?/gi,'');" +
-                "s=s.replace(/box-shadow\s*:[^;]+;?/gi,'');" +
-                "el.setAttribute('style',s);" +
-                "});" +
-                "}" +
-                "if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',clean);else clean();" +
-                "})();</script>";
+        String paginationScript = "";
 
         return "<!doctype html><html><head>" +
                 "<meta charset=\"utf-8\">" +
