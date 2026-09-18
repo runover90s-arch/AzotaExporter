@@ -324,11 +324,80 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "Hãy mở trang đề Azota trước.", Toast.LENGTH_SHORT).show();
             return;
         }
-        injectScanner();
-        status.setText("Đang quét... app sẽ tự cuộn qua đề. Không đóng trang.");
-        scanButton.setEnabled(false);
+
+        status.setText("Đang khởi động bộ quét...");
+        scanButton.setEnabled(true);
+        scanButton.setText("Đang quét…");
         scanProgress.setIndeterminate(true);
-        webView.evaluateJavascript("try{window.AZX_APP.startScan()}catch(e){window.AzotaNative.onError(String(e))}", null);
+
+        injectScannerAndStart(0);
+    }
+
+    private void injectScannerAndStart(final int attempt) {
+        if (scannerScript == null || scannerScript.isEmpty()) {
+            scannerScript = readAsset("azota_scan.js");
+        }
+
+        if (scannerScript == null || scannerScript.isEmpty()) {
+            scanButton.setEnabled(true);
+            scanButton.setText("Quét đề");
+            scanProgress.setIndeterminate(false);
+            status.setText("Không đọc được bộ quét tích hợp trong app.");
+            return;
+        }
+
+        if (attempt > 10) {
+            scanButton.setEnabled(true);
+            scanButton.setText("Quét đề");
+            scanProgress.setIndeterminate(false);
+            status.setText("Bộ quét chưa sẵn sàng. Hãy tải lại trang Azota rồi thử lại.");
+            Toast.makeText(
+                    this,
+                    "Không khởi động được bộ quét. Hãy tải lại trang rồi bấm Quét đề.",
+                    Toast.LENGTH_LONG
+            ).show();
+            return;
+        }
+
+        webView.evaluateJavascript(scannerScript, ignored -> {
+            webView.postDelayed(() -> {
+                String js =
+                        "(function(){" +
+                        "try{" +
+                        "if(window.AZX_APP && typeof window.AZX_APP.startScan==='function'){" +
+                        "window.AZX_APP.startScan();" +
+                        "return 'started';" +
+                        "}" +
+                        "return 'not_ready';" +
+                        "}catch(e){" +
+                        "try{window.AzotaNative.onError(String(e));}catch(_){}" +
+                        "return 'error';" +
+                        "}" +
+                        "})()";
+
+                webView.evaluateJavascript(js, value -> {
+                    String result = value == null ? "" : value;
+
+                    if (result.contains("not_ready")) {
+                        status.setText(
+                                "Đang nạp bộ quét... lần " + (attempt + 1)
+                        );
+                        webView.postDelayed(
+                                () -> injectScannerAndStart(attempt + 1),
+                                300
+                        );
+                    } else if (result.contains("started")) {
+                        status.setText(
+                                "Đang quét... app sẽ tự cuộn qua đề. Không đóng trang."
+                        );
+                    } else if (result.contains("error")) {
+                        scanButton.setEnabled(true);
+                        scanButton.setText("Quét đề");
+                        scanProgress.setIndeterminate(false);
+                    }
+                });
+            }, 250);
+        });
     }
 
     private String readAsset(String name) {
@@ -407,10 +476,12 @@ public class MainActivity extends Activity {
                     }
                     updateProgressUi(count, total, missing, missing.isEmpty() ? "Quét xong" : "Quét xong nhưng còn thiếu: " + missing);
                     scanButton.setEnabled(true);
+                    scanButton.setText("Quét đề");
                     scanProgress.setIndeterminate(false);
                     Toast.makeText(MainActivity.this, "Đã quét " + count + (total > 0 ? "/" + total : "") + " câu", Toast.LENGTH_SHORT).show();
                 } catch (JSONException e) {
                     scanButton.setEnabled(true);
+                    scanButton.setText("Quét đề");
                     scanProgress.setIndeterminate(false);
                     status.setText("Không đọc được dữ liệu quét. Hãy thử Quét lại.");
                 }
@@ -421,6 +492,7 @@ public class MainActivity extends Activity {
         public void onError(final String message) {
             runOnUiThread(() -> {
                 scanButton.setEnabled(true);
+                scanButton.setText("Quét đề");
                 scanProgress.setIndeterminate(false);
                 status.setText("Lỗi quét: " + message);
                 Toast.makeText(MainActivity.this, "Lỗi quét: " + message, Toast.LENGTH_LONG).show();
