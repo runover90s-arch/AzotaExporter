@@ -541,11 +541,11 @@ public class MainActivity extends Activity {
     }
 
 
+
     private void exportPdf() {
         if (!hasExtracted()) return;
 
-        status.setText("Đang chuẩn bị PDF...");
-
+        status.setText("Đang tạo PDF...");
         final String html = buildExportHtml();
 
         try {
@@ -585,78 +585,34 @@ public class MainActivity extends Activity {
                     if (started) return;
                     started = true;
 
+                    status.setText("Đang dàn trang PDF...");
+
+                    // Cho ảnh, MathJax/KaTeX và font thêm thời gian render.
                     view.postDelayed(() -> {
                         try {
-                            PrintManager printManager =
-                                    (PrintManager) getSystemService(PRINT_SERVICE);
-
-                            if (printManager == null) {
-                                throw new Exception(
-                                        "Không mở được dịch vụ in của Android"
-                                );
-                            }
-
-                            String jobName =
-                                    safeTitle() + "_" + timestamp();
-
-                            PrintDocumentAdapter adapter =
-                                    view.createPrintDocumentAdapter(jobName);
-
-                            PrintAttributes attributes =
-                                    new PrintAttributes.Builder()
-                                            .setMediaSize(
-                                                    PrintAttributes.MediaSize.ISO_A4
-                                            )
-                                            .setResolution(
-                                                    new PrintAttributes.Resolution(
-                                                            "azota_pdf",
-                                                            "Azota PDF",
-                                                            600,
-                                                            600
-                                                    )
-                                            )
-                                            .setMinMargins(
-                                                    PrintAttributes.Margins.NO_MARGINS
-                                            )
-                                            .setColorMode(
-                                                    PrintAttributes.COLOR_MODE_MONOCHROME
-                                            )
-                                            .build();
-
-                            printManager.print(
-                                    jobName,
-                                    adapter,
-                                    attributes
-                            );
-
-                            status.setText(
-                                    "Trong màn hình tiếp theo, chọn \"Lưu dưới dạng PDF\"."
-                            );
-
+                            writePdfFromWebView(view);
                         } catch (Exception e) {
                             status.setText(
-                                    "Không mở được trình xuất PDF: "
-                                            + e.getMessage()
+                                    "Xuất PDF thất bại: " + e.getMessage()
                             );
-
                             Toast.makeText(
                                     MainActivity.this,
-                                    "Lỗi PDF: " + e.getMessage(),
+                                    "Xuất PDF thất bại: " + e.getMessage(),
                                     Toast.LENGTH_LONG
                             ).show();
                         }
-                    }, 1800);
+                    }, 1400);
                 }
             });
 
-            // Giữ WebView trong cây View nhưng rất nhỏ.
+            // Chỉ giữ WebView tạm trong cây giao diện; writePdfFromWebView()
+            // sẽ tự đo lại ở bề rộng chuẩn trước khi render.
             LinearLayout.LayoutParams lp =
                     new LinearLayout.LayoutParams(1, 1);
 
             root.addView(pdfPrintWebView, lp);
 
-            String base =
-                    extracted.optString("url", START_URL);
+            String base = extracted.optString("url", START_URL);
 
             pdfPrintWebView.loadDataWithBaseURL(
                     base,
@@ -678,7 +634,6 @@ public class MainActivity extends Activity {
             ).show();
         }
     }
-
 
 
     private String buildExportHtml() {
@@ -915,12 +870,12 @@ public class MainActivity extends Activity {
             final int margin = 28;
 
             int viewWidth = printWeb.getWidth();
-            if (viewWidth <= 0) {
+            if (viewWidth < 600) {
                 viewWidth = Math.max(1080, root.getWidth());
                 int widthSpec = View.MeasureSpec.makeMeasureSpec(
                         viewWidth, View.MeasureSpec.EXACTLY);
                 int heightSpec = View.MeasureSpec.makeMeasureSpec(
-                        1, View.MeasureSpec.UNSPECIFIED);
+                        0, View.MeasureSpec.UNSPECIFIED);
 
                 printWeb.measure(widthSpec, heightSpec);
                 printWeb.layout(
@@ -951,6 +906,13 @@ public class MainActivity extends Activity {
                     1,
                     (int) Math.ceil(contentHeight / (double) sliceHeight)
             );
+
+            if (pageCount > 200) {
+                throw new Exception(
+                        "Bố cục PDF bất thường (" + pageCount +
+                        " trang). Hãy quét lại đề rồi thử lại."
+                );
+            }
 
             for (int i = 0; i < pageCount; i++) {
                 android.graphics.pdf.PdfDocument.PageInfo pageInfo =
@@ -1037,6 +999,10 @@ public class MainActivity extends Activity {
             try {
                 printWeb.destroy();
             } catch (Exception ignored) {}
+
+            if (pdfPrintWebView == printWeb) {
+                pdfPrintWebView = null;
+            }
         }
     }
 
