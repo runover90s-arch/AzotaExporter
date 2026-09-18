@@ -510,67 +510,152 @@ public class MainActivity extends Activity {
                 htmlEscape(extracted.optString("title", "Đề Azota")) + "</div>" + body + "</main></body></html>";
     }
 
+
     private void writePdfFromWebView(WebView printWeb) {
         String name = safeTitle() + "_" + timestamp() + ".pdf";
         Uri uri = createDownload(name, "application/pdf");
+
         if (uri == null) {
             status.setText("Không tạo được file PDF.");
             root.removeView(printWeb);
             printWeb.destroy();
             return;
         }
+
+        android.graphics.pdf.PdfDocument document =
+                new android.graphics.pdf.PdfDocument();
+
         try {
-            ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(uri, "w");
-            if (pfd == null) throw new Exception("Không mở được file đích");
-            PrintDocumentAdapter adapter = printWeb.createPrintDocumentAdapter(name);
-            PrintAttributes attrs = new PrintAttributes.Builder()
-                    .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
-                    .setResolution(new PrintAttributes.Resolution("pdf", "PDF", 600, 600))
-                    .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
-                    .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
-                    .build();
-            CancellationSignal signal = new CancellationSignal();
-            adapter.onLayout(null, attrs, signal, new PrintDocumentAdapter.LayoutResultCallback() {
-                @Override
-                public void onLayoutFinished(android.print.PrintDocumentInfo info, boolean changed) {
-                    adapter.onWrite(new PageRange[]{PageRange.ALL_PAGES}, pfd, signal, new PrintDocumentAdapter.WriteResultCallback() {
-                        @Override
-                        public void onWriteFinished(PageRange[] pages) {
-                            try { pfd.close(); } catch (Exception ignored) {}
-                            finishDownload(uri);
-                            root.removeView(printWeb);
-                            printWeb.destroy();
-                            status.setText("Đã lưu PDF vào Download/AzotaExporter");
-                            Toast.makeText(MainActivity.this, "Đã xuất PDF", Toast.LENGTH_LONG).show();
-                        }
+            final int pageWidth = 595;
+            final int pageHeight = 842;
+            final int margin = 28;
 
-                        @Override
-                        public void onWriteFailed(CharSequence error) {
-                            try { pfd.close(); } catch (Exception ignored) {}
-                            failDownload(uri);
-                            root.removeView(printWeb);
-                            printWeb.destroy();
-                            status.setText("Xuất PDF thất bại: " + error);
-                        }
-                    });
+            int viewWidth = printWeb.getWidth();
+            if (viewWidth <= 0) {
+                viewWidth = Math.max(1080, root.getWidth());
+                int widthSpec = View.MeasureSpec.makeMeasureSpec(
+                        viewWidth, View.MeasureSpec.EXACTLY);
+                int heightSpec = View.MeasureSpec.makeMeasureSpec(
+                        1, View.MeasureSpec.UNSPECIFIED);
+
+                printWeb.measure(widthSpec, heightSpec);
+                printWeb.layout(
+                        0,
+                        0,
+                        viewWidth,
+                        Math.max(printWeb.getMeasuredHeight(), 1)
+                );
+            }
+
+            float webScale = printWeb.getScale();
+            if (webScale <= 0f) webScale = 1f;
+
+            int contentHeight = Math.max(
+                    printWeb.getHeight(),
+                    Math.round(printWeb.getContentHeight() * webScale)
+            );
+
+            float pdfScale =
+                    (pageWidth - 2f * margin) / (float) viewWidth;
+
+            int sliceHeight = Math.max(
+                    1,
+                    (int) ((pageHeight - 2f * margin) / pdfScale)
+            );
+
+            int pageCount = Math.max(
+                    1,
+                    (int) Math.ceil(contentHeight / (double) sliceHeight)
+            );
+
+            for (int i = 0; i < pageCount; i++) {
+                android.graphics.pdf.PdfDocument.PageInfo pageInfo =
+                        new android.graphics.pdf.PdfDocument.PageInfo.Builder(
+                                pageWidth,
+                                pageHeight,
+                                i + 1
+                        ).create();
+
+                android.graphics.pdf.PdfDocument.Page page =
+                        document.startPage(pageInfo);
+
+                android.graphics.Canvas canvas = page.getCanvas();
+
+                canvas.drawColor(Color.WHITE);
+                canvas.save();
+
+                canvas.translate(margin, margin);
+                canvas.scale(pdfScale, pdfScale);
+
+                canvas.clipRect(
+                        0,
+                        0,
+                        viewWidth,
+                        sliceHeight
+                );
+
+                canvas.translate(
+                        0,
+                        -(i * sliceHeight)
+                );
+
+                printWeb.draw(canvas);
+
+                canvas.restore();
+                document.finishPage(page);
+            }
+
+            try (OutputStream out =
+                         getContentResolver().openOutputStream(uri)) {
+
+                if (out == null) {
+                    throw new Exception("Không mở được file PDF đầu ra");
                 }
 
-                @Override
-                public void onLayoutFailed(CharSequence error) {
-                    try { pfd.close(); } catch (Exception ignored) {}
-                    failDownload(uri);
-                    root.removeView(printWeb);
-                    printWeb.destroy();
-                    status.setText("Dàn trang PDF thất bại: " + error);
-                }
-            }, null);
+                document.writeTo(out);
+                out.flush();
+            }
+
+            finishDownload(uri);
+
+            status.setText(
+                    "Đã lưu PDF vào Download/AzotaExporter"
+            );
+
+            Toast.makeText(
+                    this,
+                    "Đã xuất PDF: " + name,
+                    Toast.LENGTH_LONG
+            ).show();
+
         } catch (Exception e) {
             failDownload(uri);
-            root.removeView(printWeb);
-            printWeb.destroy();
-            status.setText("Lỗi tạo PDF: " + e.getMessage());
+
+            status.setText(
+                    "Xuất PDF thất bại: " + e.getMessage()
+            );
+
+            Toast.makeText(
+                    this,
+                    "Xuất PDF thất bại: " + e.getMessage(),
+                    Toast.LENGTH_LONG
+            ).show();
+
+        } finally {
+            try {
+                document.close();
+            } catch (Exception ignored) {}
+
+            try {
+                root.removeView(printWeb);
+            } catch (Exception ignored) {}
+
+            try {
+                printWeb.destroy();
+            } catch (Exception ignored) {}
         }
     }
+
 
     private void exportDocx() {
         if (!hasExtracted()) return;
