@@ -547,7 +547,7 @@ public class MainActivity extends Activity {
                                                     PrintAttributes.Margins.NO_MARGINS
                                             )
                                             .setColorMode(
-                                                    PrintAttributes.COLOR_MODE_COLOR
+                                                    PrintAttributes.COLOR_MODE_MONOCHROME
                                             )
                                             .build();
 
@@ -608,38 +608,232 @@ public class MainActivity extends Activity {
     }
 
 
+
     private String buildExportHtml() {
-        StringBuilder css = new StringBuilder();
+        StringBuilder cssLinks = new StringBuilder();
         JSONArray styles = extracted.optJSONArray("styles");
+
         if (styles != null) {
             for (int i = 0; i < styles.length(); i++) {
                 String href = styles.optString(i, "");
-                if (!href.isEmpty()) css.append("<link rel=\"stylesheet\" href=\"").append(htmlEscape(href)).append("\">\n");
+                if (!href.isEmpty()) {
+                    cssLinks.append("<link rel=\"stylesheet\" href=\"")
+                            .append(htmlEscape(href))
+                            .append("\">
+");
+                }
             }
         }
+
         StringBuilder body = new StringBuilder();
         JSONArray qs = extracted.optJSONArray("questions");
+        String previousSection = "";
+
         for (int i = 0; qs != null && i < qs.length(); i++) {
             JSONObject q = qs.optJSONObject(i);
             if (q == null) continue;
+
             String sectionTitle = q.optString("sectionTitle", "");
-            String previousSection = i > 0
-                    ? qs.optJSONObject(i - 1).optString("sectionTitle", "")
-                    : "";
+            String instruction = q.optString("sectionInstruction", "");
 
             if (!sectionTitle.isEmpty() && !sectionTitle.equals(previousSection)) {
-                body.append("<div class=\"azx-section-title\">")
+                body.append("<section class=\"azx-section-head\">")
+                        .append("<div class=\"azx-section-title\">")
                         .append(htmlEscape(sectionTitle))
-                        .append("</div>\n");
+                        .append("</div>");
+
+                if (!instruction.isEmpty()) {
+                    body.append("<div class=\"azx-section-instruction\">")
+                            .append(htmlEscape(instruction))
+                            .append("</div>");
+                }
+
+                body.append("</section>");
+                previousSection = sectionTitle;
             }
 
-            body.append("<section class=\"azx-question\">")
-                    .append(q.optString("html", ""))
-                    .append("</section>\n");
+            String type = q.optString("type", "other");
+            String stem = q.optString("stemHtml", "");
+
+            body.append("<article class=\"azx-question azx-type-")
+                    .append(type.replaceAll("[^a-z_]", ""))
+                    .append("\">");
+
+            body.append("<div class=\"azx-stem\">")
+                    .append("<span class=\"azx-question-number\">Câu ")
+                    .append(q.optInt("n", i + 1))
+                    .append(".</span> ")
+                    .append(stem)
+                    .append("</div>");
+
+            if ("multiple_choice".equals(type)) {
+                JSONArray options = q.optJSONArray("options");
+
+                if (options != null && options.length() > 0) {
+                    boolean compact = q.optBoolean("compactOptions", false);
+
+                    body.append("<div class=\"azx-options")
+                            .append(compact ? " azx-options-compact" : "")
+                            .append("\">");
+
+                    for (int j = 0; j < options.length(); j++) {
+                        JSONObject op = options.optJSONObject(j);
+                        if (op == null) continue;
+
+                        body.append("<div class=\"azx-option\">")
+                                .append("<span class=\"azx-choice-letter\">")
+                                .append(htmlEscape(op.optString("label", "")))
+                                .append("</span>")
+                                .append("<div class=\"azx-option-text\">")
+                                .append(op.optString("html", ""))
+                                .append("</div>")
+                                .append("</div>");
+                    }
+
+                    body.append("</div>");
+                }
+            } else if ("true_false".equals(type)) {
+                JSONArray statements = q.optJSONArray("statements");
+
+                if (statements != null && statements.length() > 0) {
+                    body.append("<table class=\"azx-tf-table\">")
+                            .append("<colgroup><col class=\"azx-col-statement\"><col class=\"azx-col-tf\"><col class=\"azx-col-tf\"></colgroup>")
+                            .append("<thead><tr><th>Phát biểu</th><th>Đúng</th><th>Sai</th></tr></thead>")
+                            .append("<tbody>");
+
+                    for (int j = 0; j < statements.length(); j++) {
+                        JSONObject st = statements.optJSONObject(j);
+                        if (st == null) continue;
+
+                        body.append("<tr>")
+                                .append("<td><span class=\"azx-statement-label\">")
+                                .append(htmlEscape(st.optString("label", "")))
+                                .append("</span> ")
+                                .append(st.optString("html", ""))
+                                .append("</td>")
+                                .append("<td class=\"azx-tf-cell\"></td>")
+                                .append("<td class=\"azx-tf-cell\"></td>")
+                                .append("</tr>");
+                    }
+
+                    body.append("</tbody></table>");
+                }
+            } else if ("short_answer".equals(type)) {
+                body.append("<div class=\"azx-kq-row\">")
+                        .append("<span class=\"azx-kq-label\">KQ:</span>")
+                        .append("<span class=\"azx-kq-box\"></span>")
+                        .append("</div>");
+            }
+
+            body.append("</article>");
         }
-        return "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
-                css + "<style>@page{size:A4;margin:13mm}html,body{background:#fff!important;color:#111!important}body{font-family:Arial,'Times New Roman',sans-serif;line-height:1.5}main{max-width:900px;margin:auto}.azx-title{text-align:center;font-weight:700;font-size:20px;margin:0 0 14px}.azx-section-title{font-weight:700;font-size:18px;margin:22px 0 12px}.azx-question{break-inside:avoid;page-break-inside:avoid;margin:0 0 16px;padding:10px 12px;border:1px solid #ddd;border-radius:8px;background:#fff!important}img,svg,mjx-container{max-width:100%!important;height:auto!important}button,input,textarea,select{display:none!important}</style></head><body><main><div class=\"azx-title\">" +
-                htmlEscape(extracted.optString("title", "Đề Azota")) + "</div>" + body + "</main></body></html>";
+
+        String style =
+                "@page{size:A4 portrait;margin:17mm 18mm 17mm 18mm;" +
+                "@bottom-center{content:counter(page);font-size:9pt;color:#000;}}" +
+
+                "html,body{background:#fff!important;color:#000!important;" +
+                "-webkit-print-color-adjust:economy;print-color-adjust:economy;}" +
+
+                "body{font-family:'Times New Roman','Noto Serif',serif;" +
+                "font-size:11pt;line-height:1.42;margin:0;padding:0;}" +
+
+                "main{width:100%;max-width:100%;margin:0 auto;}" +
+
+                ".azx-doc-title{font-family:Arial,'Noto Sans',sans-serif;" +
+                "text-align:center;font-size:15.5pt;font-weight:700;" +
+                "line-height:1.25;margin:0 0 14pt;}" +
+
+                ".azx-section-head{break-after:avoid;page-break-after:avoid;margin:14pt 0 8pt;}" +
+                ".azx-section-title{font-family:Arial,'Noto Sans',sans-serif;" +
+                "font-size:12.5pt;font-weight:700;line-height:1.25;text-transform:none;}" +
+                ".azx-section-instruction{font-family:Arial,'Noto Sans',sans-serif;" +
+                "font-size:9.7pt;line-height:1.35;margin-top:3pt;}" +
+
+                ".azx-question{margin:0 0 11pt;padding:0;border:0!important;" +
+                "background:#fff!important;break-inside:avoid;page-break-inside:avoid;}" +
+
+                ".azx-stem{margin:0 0 5pt;}" +
+                ".azx-question-number{font-family:Arial,'Noto Sans',sans-serif;" +
+                "font-weight:700;white-space:nowrap;}" +
+
+                ".azx-question *{color:#000!important;text-shadow:none!important;box-shadow:none!important;}" +
+                ".azx-question [class*='selected'],.azx-question [class*='active']{" +
+                "background:#fff!important;color:#000!important;}" +
+
+                "mjx-container,.katex,math{font-family:'Cambria Math','STIX Two Math','Times New Roman',serif!important;" +
+                "color:#000!important;max-width:100%!important;}" +
+
+                "img,svg,canvas{max-width:100%!important;height:auto!important;}" +
+
+                ".azx-options{display:grid;grid-template-columns:1fr;gap:5pt 12pt;margin:5pt 0 0 0;}" +
+                ".azx-options.azx-options-compact{grid-template-columns:1fr 1fr;}" +
+                ".azx-option{display:flex;align-items:flex-start;gap:6px;min-width:0;" +
+                "break-inside:avoid;page-break-inside:avoid;}" +
+
+                ".azx-choice-letter{display:inline-flex!important;align-items:center!important;" +
+                "justify-content:center!important;box-sizing:border-box!important;" +
+                "width:20px!important;height:20px!important;min-width:20px!important;min-height:20px!important;" +
+                "border:0.8px solid #000!important;border-radius:50%!important;background:#fff!important;" +
+                "font-family:Arial,'Noto Sans',sans-serif!important;font-size:9pt!important;" +
+                "font-weight:700!important;line-height:1!important;padding:0!important;margin:0!important;}" +
+
+                ".azx-option-text{flex:1;min-width:0;}" +
+                ".azx-option-text .azx-choice-letter{display:none!important;}" +
+
+                ".azx-tf-table{width:100%;border-collapse:collapse;table-layout:fixed;" +
+                "margin:6pt 0 2pt;break-inside:avoid;page-break-inside:avoid;}" +
+                ".azx-tf-table th,.azx-tf-table td{border:0.8px solid #000!important;" +
+                "padding:5px 6px;vertical-align:top;background:#fff!important;}" +
+                ".azx-tf-table th{font-family:Arial,'Noto Sans',sans-serif;font-size:9.5pt;" +
+                "font-weight:700;text-align:center;vertical-align:middle;}" +
+                ".azx-col-statement{width:auto}.azx-col-tf{width:12mm;}" +
+                ".azx-tf-cell{height:22px;text-align:center;vertical-align:middle!important;}" +
+                ".azx-statement-label{font-weight:700;}" +
+                ".azx-tf-table .azx-tf-label{display:none!important;}" +
+
+                ".azx-kq-row{display:flex;align-items:center;justify-content:flex-end;gap:7px;" +
+                "margin-top:5pt;break-inside:avoid;page-break-inside:avoid;}" +
+                ".azx-kq-label{font-family:Arial,'Noto Sans',sans-serif;font-weight:700;}" +
+                ".azx-kq-box{display:inline-block;width:62mm;height:10mm;" +
+                "border:0.8px solid #000;background:#fff;box-sizing:border-box;}" +
+
+                "table{border-collapse:collapse;max-width:100%;}" +
+                "a{color:#000!important;text-decoration:none!important;}" +
+                "input,textarea,select,button{display:none!important;}" +
+
+                "@media(max-width:650px){.azx-options.azx-options-compact{grid-template-columns:1fr 1fr;}}" +
+                "@media print{.azx-question{orphans:3;widows:3;}" +
+                ".azx-section-head{break-after:avoid-page;page-break-after:avoid;}}";
+
+        String paginationScript =
+                "<script>(function(){" +
+                "function clean(){" +
+                "document.querySelectorAll('.azx-option-text .azx-choice-letter').forEach(function(x){x.remove();});" +
+                "document.querySelectorAll('[style]').forEach(function(el){" +
+                "var s=el.getAttribute('style')||'';" +
+                "s=s.replace(/background(?:-color)?\s*:[^;]+;?/gi,'');" +
+                "s=s.replace(/color\s*:[^;]+;?/gi,'');" +
+                "s=s.replace(/box-shadow\s*:[^;]+;?/gi,'');" +
+                "el.setAttribute('style',s);" +
+                "});" +
+                "}" +
+                "if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',clean);else clean();" +
+                "})();</script>";
+
+        return "<!doctype html><html><head>" +
+                "<meta charset=\"utf-8\">" +
+                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+                cssLinks +
+                "<style>" + style + "</style>" +
+                "</head><body><main>" +
+                "<div class=\"azx-doc-title\">" +
+                htmlEscape(extracted.optString("title", "Đề Azota")) +
+                "</div>" +
+                body +
+                "</main>" +
+                paginationScript +
+                "</body></html>";
     }
 
 

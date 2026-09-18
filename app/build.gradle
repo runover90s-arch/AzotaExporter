@@ -10,7 +10,7 @@ android {
         applicationId 'com.openai.azotaexporter'
         minSdk 29
         targetSdk 35
-        versionCode 2
-        versionName '2.0.0'
+        versionCode 5
+        versionName '5.0.0'
     }
 }
