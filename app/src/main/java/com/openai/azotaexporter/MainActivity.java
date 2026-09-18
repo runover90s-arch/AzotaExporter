@@ -16,6 +16,7 @@ import android.os.ParcelFileDescriptor;
 import android.print.PageRange;
 import android.print.PrintAttributes;
 import android.print.PrintDocumentAdapter;
+import android.print.PrintManager;
 import android.provider.MediaStore;
 import android.text.InputType;
 import android.util.Base64;
@@ -76,6 +77,7 @@ public class MainActivity extends Activity {
     private Button pdfButton;
     private Button docxButton;
     private WebView webView;
+    private WebView pdfPrintWebView;
     private JSONObject extracted;
     private ExecutorService executor;
     private String scannerScript;
@@ -466,30 +468,145 @@ public class MainActivity extends Activity {
         if (uri != null) getContentResolver().delete(uri, null, null);
     }
 
+
     private void exportPdf() {
         if (!hasExtracted()) return;
-        status.setText("Đang tạo PDF...");
-        final String html = buildExportHtml();
-        final WebView printWeb = new WebView(this);
-        printWeb.setVisibility(View.INVISIBLE);
-        printWeb.getSettings().setJavaScriptEnabled(true);
-        printWeb.getSettings().setDomStorageEnabled(true);
-        printWeb.getSettings().setLoadsImagesAutomatically(true);
-        CookieManager.getInstance().setAcceptThirdPartyCookies(printWeb, true);
-        root.addView(printWeb, new LinearLayout.LayoutParams(1, 1));
 
-        printWeb.setWebViewClient(new WebViewClient() {
-            private boolean started = false;
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                if (started) return;
-                started = true;
-                view.postDelayed(() -> writePdfFromWebView(printWeb), 1800);
+        status.setText("Đang chuẩn bị PDF...");
+
+        final String html = buildExportHtml();
+
+        try {
+            if (pdfPrintWebView != null) {
+                try {
+                    root.removeView(pdfPrintWebView);
+                } catch (Exception ignored) {}
+
+                try {
+                    pdfPrintWebView.destroy();
+                } catch (Exception ignored) {}
+
+                pdfPrintWebView = null;
             }
-        });
-        String base = extracted.optString("url", START_URL);
-        printWeb.loadDataWithBaseURL(base, html, "text/html", "UTF-8", null);
+
+            pdfPrintWebView = new WebView(this);
+
+            WebSettings settings = pdfPrintWebView.getSettings();
+            settings.setJavaScriptEnabled(true);
+            settings.setDomStorageEnabled(true);
+            settings.setLoadsImagesAutomatically(true);
+            settings.setUseWideViewPort(true);
+            settings.setLoadWithOverviewMode(false);
+
+            CookieManager.getInstance()
+                    .setAcceptThirdPartyCookies(pdfPrintWebView, true);
+
+            pdfPrintWebView.setBackgroundColor(Color.WHITE);
+
+            pdfPrintWebView.setWebViewClient(new WebViewClient() {
+                private boolean started = false;
+
+                @Override
+                public void onPageFinished(WebView view, String url) {
+                    super.onPageFinished(view, url);
+
+                    if (started) return;
+                    started = true;
+
+                    view.postDelayed(() -> {
+                        try {
+                            PrintManager printManager =
+                                    (PrintManager) getSystemService(PRINT_SERVICE);
+
+                            if (printManager == null) {
+                                throw new Exception(
+                                        "Không mở được dịch vụ in của Android"
+                                );
+                            }
+
+                            String jobName =
+                                    safeTitle() + "_" + timestamp();
+
+                            PrintDocumentAdapter adapter =
+                                    view.createPrintDocumentAdapter(jobName);
+
+                            PrintAttributes attributes =
+                                    new PrintAttributes.Builder()
+                                            .setMediaSize(
+                                                    PrintAttributes.MediaSize.ISO_A4
+                                            )
+                                            .setResolution(
+                                                    new PrintAttributes.Resolution(
+                                                            "azota_pdf",
+                                                            "Azota PDF",
+                                                            600,
+                                                            600
+                                                    )
+                                            )
+                                            .setMinMargins(
+                                                    PrintAttributes.Margins.NO_MARGINS
+                                            )
+                                            .setColorMode(
+                                                    PrintAttributes.COLOR_MODE_COLOR
+                                            )
+                                            .build();
+
+                            printManager.print(
+                                    jobName,
+                                    adapter,
+                                    attributes
+                            );
+
+                            status.setText(
+                                    "Trong màn hình tiếp theo, chọn \"Lưu dưới dạng PDF\"."
+                            );
+
+                        } catch (Exception e) {
+                            status.setText(
+                                    "Không mở được trình xuất PDF: "
+                                            + e.getMessage()
+                            );
+
+                            Toast.makeText(
+                                    MainActivity.this,
+                                    "Lỗi PDF: " + e.getMessage(),
+                                    Toast.LENGTH_LONG
+                            ).show();
+                        }
+                    }, 1800);
+                }
+            });
+
+            // Giữ WebView trong cây View nhưng rất nhỏ.
+            LinearLayout.LayoutParams lp =
+                    new LinearLayout.LayoutParams(1, 1);
+
+            root.addView(pdfPrintWebView, lp);
+
+            String base =
+                    extracted.optString("url", START_URL);
+
+            pdfPrintWebView.loadDataWithBaseURL(
+                    base,
+                    html,
+                    "text/html",
+                    "UTF-8",
+                    null
+            );
+
+        } catch (Exception e) {
+            status.setText(
+                    "Xuất PDF thất bại: " + e.getMessage()
+            );
+
+            Toast.makeText(
+                    this,
+                    "Xuất PDF thất bại: " + e.getMessage(),
+                    Toast.LENGTH_LONG
+            ).show();
+        }
     }
+
 
     private String buildExportHtml() {
         StringBuilder css = new StringBuilder();
@@ -946,6 +1063,14 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         if (executor != null) executor.shutdownNow();
+
+        if (pdfPrintWebView != null) {
+            try {
+                pdfPrintWebView.destroy();
+            } catch (Exception ignored) {}
+            pdfPrintWebView = null;
+        }
+
         if (webView != null) webView.destroy();
         super.onDestroy();
     }
